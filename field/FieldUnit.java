@@ -35,7 +35,7 @@ public class FieldUnit implements IFieldUnit {
    * (Which is used to init DatagramPacket?)
    */
 
-  private static final int buffsize = 2048;
+  private static final int buffsize = 40;
   private int timeout = 50000;
   private ArrayList<MessageInfo> receivedMessages = null;
   private int totalMessagesExpected = 0;
@@ -118,6 +118,12 @@ public class FieldUnit implements IFieldUnit {
 
       try {
         msg = new MessageInfo(new String(packet.getData()));
+        System.out.println("[Field Unit] Message "
+            + msg.getMessageNum() + " out of "
+            + msg.getTotalMessages() +
+            " received. "
+            + "Value = "
+            + msg.getMessage());
         if (this.totalMessagesExpected == 0) {
           this.totalMessagesExpected = msg.getTotalMessages();
         }
