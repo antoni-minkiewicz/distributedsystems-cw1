@@ -40,6 +40,7 @@ public class CentralServer extends UnicastRemoteObject implements ICentralServer
 
     /* System.setProperty("java.security.policy","file:./policy\n"); */
 
+    int port = Integer.parseInt(args[0]);
     /* TODO: Configure Security Manager */
     if (System.getSecurityManager() == null) {
       System.setSecurityManager(new SecurityManager());
@@ -47,7 +48,7 @@ public class CentralServer extends UnicastRemoteObject implements ICentralServer
     Registry registry = null;
     /* TODO: Create (or Locate) Registry */
     try {
-      registry = LocateRegistry.createRegistry(1000);
+      registry = LocateRegistry.createRegistry(port);
     } catch (RemoteException e) {
       e.printStackTrace();
     }
