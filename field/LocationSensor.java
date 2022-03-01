@@ -6,8 +6,9 @@ import common.Location;
 
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
-
-public class LocationSensor /* TODO extend appropriate classes and implement the appropriate interfaces */ {
+/* TODO extend appropriate classes and implement the appropriate interfaces */
+public class LocationSensor extends UnicastRemoteObject implements
+    ILocationSensor {
     private Location location;
 
     public LocationSensor () throws RemoteException {
