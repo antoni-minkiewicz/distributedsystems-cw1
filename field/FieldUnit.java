@@ -136,6 +136,7 @@ public class FieldUnit implements IFieldUnit {
       if (msg.getMessageNum() == msg.getTotalMessages()) {
         break;
       }
+      msg = null;
 
     }
 
