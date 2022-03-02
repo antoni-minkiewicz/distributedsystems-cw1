@@ -97,10 +97,12 @@ public class FieldUnit implements IFieldUnit {
     boolean listen = true;
 
     System.out.println("[Field Unit] Listening on port: " + port);
-
-    DatagramPacket packet = new DatagramPacket(new byte[buffsize], buffsize);
     MessageInfo msg = null;
+    DatagramPacket packet = null;
+    byte[] buffer = new byte[buffsize];
     while (listen) {
+      buffer = new byte[buffsize];
+      packet = new DatagramPacket(buffer, buffsize);
 
       /* TODO: Receive until all messages in the transmission (msgTot) have been received or
                 until there is nothing more to be received */
