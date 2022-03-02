@@ -260,7 +260,7 @@ public class FieldUnit implements IFieldUnit {
           missingMessagesNumbers.add(i);
         }
       }
-      System.out.println("Message Numbers of Missing Messages:" + missingMessagesNumbers.toString())
+      System.out.println("Message Numbers of Missing Messages:" + missingMessagesNumbers.toString());
     }
     System.out.println("===============================");
   }
