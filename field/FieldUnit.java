@@ -18,6 +18,7 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.ArrayList;
 
+
 /* You can add/change/delete class attributes if you think it would be
  * appropriate.
  * You can also add helper methods and change the implementation of those
@@ -36,18 +37,19 @@ public class FieldUnit implements IFieldUnit {
    */
 
   private static final int buffsize = 40;
-  private int timeout = 50000;
-  private ArrayList<MessageInfo> receivedMessages = null;
+  private ArrayList<MessageInfo> receivedMessages;
   private int totalMessagesExpected = 0;
-  private ArrayList<Float> movingAverages = null;
+  private ArrayList<Float> movingAverages;
   private DatagramSocket UDPSocket = null;
   private LocationSensor locationSensor;
+  private ArrayList<Integer> missingMessagesNumbers;
 
 
   public FieldUnit() {
     /* TODO: Initialise data structures */
     receivedMessages = new ArrayList<MessageInfo>();
     movingAverages = new ArrayList<Float>();
+    missingMessagesNumbers = new ArrayList<Integer>();
     try {
       locationSensor = new LocationSensor();
     } catch (RemoteException e) {
@@ -246,9 +248,20 @@ public class FieldUnit implements IFieldUnit {
     int missing_messages = this.totalMessagesExpected - this.receivedMessages.size();
     System.out.println("Total Missing Messages = "
         + missing_messages + " out of "
-        + this.receivedMessages.size());
+        + this.totalMessagesExpected);
     /* TODO: Print stats (i.e. how many message missing?
      * do we know their sequence number? etc.) I can figure this out */
+    if (missing_messages > 0) {
+      int iterator = 0;
+      for (int i = 1; i <= this.totalMessagesExpected; i++) {
+        if (this.receivedMessages.get(iterator).getMessageNum() == i) {
+          iterator++;
+        } else {
+          missingMessagesNumbers.add(i);
+        }
+      }
+      System.out.println("Message Numbers of Missing Messages:" + missingMessagesNumbers.toString())
+    }
     System.out.println("===============================");
   }
 
@@ -257,6 +270,7 @@ public class FieldUnit implements IFieldUnit {
     totalMessagesExpected = 0;
     receivedMessages.clear();
     movingAverages.clear();
+    missingMessagesNumbers.clear();
   }
 
 
