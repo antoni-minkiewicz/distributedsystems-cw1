@@ -1,11 +1,9 @@
 package field;
-/*
- * Created on Feb 2022
- */
 
 import centralserver.ICentralServer;
 import common.MessageInfo;
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.SocketException;
@@ -19,37 +17,38 @@ import java.rmi.registry.Registry;
 import java.util.ArrayList;
 
 
-/* You can add/change/delete class attributes if you think it would be
- * appropriate.
- * You can also add helper methods and change the implementation of those
- * provided if you think it would be appropriate, as long as you DO NOT
- * CHANGE the provided interface.
- */
-
-
 public class FieldUnit implements IFieldUnit {
 
   private ICentralServer central_server;
 
   /* Note: Could you discuss in one line of comment what do you think can be
-   * an appropriate size for buffsize?
-   * (Which is used to init DatagramPacket?)
+   * an appropriate size for buffsize? What we are receiving is a string version of MessageInfo
+   * this means that for each char we need 1byte. Float will be 8 characters max, 2 semicolons
+   * Messages go up to lets say 10000. That means buffsize should be 20.
+   *
    */
 
-  private static final int buffsize = 40;
-  private ArrayList<MessageInfo> receivedMessages;
-  private int totalMessagesExpected = 0;
-  private ArrayList<Float> movingAverages;
+
   private DatagramSocket UDPSocket = null;
   private LocationSensor locationSensor;
-  private ArrayList<Integer> missingMessagesNumbers;
+
+  private static final int bufferSize = 20;
+  private boolean isFirstMessageInExchange = true;
+  private ArrayList<MessageInfo> receivedMessages;
+  private int totalMessagesExpectedInCurrentExchange = 0;
+
+  private ArrayList<Integer> missingMessageIds;
+  private ArrayList<Float> movingAverages;
+  private ArrayList<Long> arrayOfTimesTaken;
+  private ArrayList<Long> arrayOfTimesTakenToSendToCentralServer;
 
 
   public FieldUnit() {
-    /* TODO: Initialise data structures */
     receivedMessages = new ArrayList<MessageInfo>();
     movingAverages = new ArrayList<Float>();
-    missingMessagesNumbers = new ArrayList<Integer>();
+    missingMessageIds = new ArrayList<Integer>();
+    arrayOfTimesTaken = new ArrayList<Long>();
+    arrayOfTimesTakenToSendToCentralServer = new ArrayList<Long>();
     try {
       locationSensor = new LocationSensor();
     } catch (RemoteException e) {
@@ -60,22 +59,20 @@ public class FieldUnit implements IFieldUnit {
 
   @Override
   public void addMessage(MessageInfo msg) {
-    /* TODO: Save received message in receivedMessages */
     receivedMessages.add(msg);
   }
 
   @Override
   public void sMovingAverage(int k) {
-    /* TODO: Compute SMA and store values in a class attribute */
     float sum = 0;
     float movingAverage = 0;
-    int received_messages = this.receivedMessages.size();
+    int sizeOfReceivedMessages = this.receivedMessages.size();
 
     System.out.println("[Field Unit] Computing SMAs\n");
-
-    for (int j = 0; j < received_messages; j++ ) {
+    /* Computes moving average for given number k*/
+    for (int j = 0; j < sizeOfReceivedMessages; j++) {
       sum = 0;
-      if((j+1) >= k) {
+      if ((j + 1) >= k) {
         for (int i = j; i > (j - k); i--) {
           sum += this.receivedMessages.get(i).getMessage();
         }
@@ -92,7 +89,6 @@ public class FieldUnit implements IFieldUnit {
   @Override
   public void receiveMeasures(int port, int timeout) throws SocketException {
 
-    /* TODO: Create UDP socket and bind to local port 'port' */
     this.UDPSocket = new DatagramSocket(port);
     this.UDPSocket.setSoTimeout(timeout);
 
@@ -101,50 +97,41 @@ public class FieldUnit implements IFieldUnit {
     System.out.println("[Field Unit] Listening on port: " + port);
     MessageInfo msg = null;
     DatagramPacket packet = null;
-    byte[] buffer = new byte[buffsize];
+    byte[] buffer = new byte[bufferSize];
     while (listen) {
-      buffer = new byte[buffsize];
-      packet = new DatagramPacket(buffer, buffsize);
+      buffer = new byte[bufferSize];
+      packet = new DatagramPacket(buffer, bufferSize);
 
-      /* TODO: Receive until all messages in the transmission (msgTot) have been received or
-                until there is nothing more to be received */
       try {
+        long startTime = System.nanoTime();
         UDPSocket.receive(packet);
+        long totalTime = System.nanoTime() - startTime;
+        this.arrayOfTimesTaken.add(totalTime);
+        msg = new MessageInfo(new String(packet.getData()));
+        if (this.isFirstMessageInExchange) {
+          this.isFirstMessageInExchange = false;
+          this.totalMessagesExpectedInCurrentExchange = msg.getTotalMessages();
+        }
 
+        System.out.println(
+            "[Field Unit] Message " + msg.getMessageNum() + " out of " + msg.getTotalMessages()
+                + " received. " + "Value = " + msg.getMessage());
       } catch (SocketTimeoutException e) {
-        e.printStackTrace();
+        System.out.println("Timed out");
         break;
       } catch (IOException e) {
         e.printStackTrace();
-      }
-
-      /* TODO: If this is the first message, initialise the receive data structure before storing it. ??*/
-
-      try {
-        msg = new MessageInfo(new String(packet.getData()));
-        System.out.println("[Field Unit] Message "
-            + msg.getMessageNum() + " out of "
-            + msg.getTotalMessages() +
-            " received. "
-            + "Value = "
-            + msg.getMessage());
-        if (this.totalMessagesExpected == 0) {
-          this.totalMessagesExpected = msg.getTotalMessages();
-        }
       } catch (Exception e) {
         e.printStackTrace();
       }
-      /* TODO: Store the message */
       this.receivedMessages.add(msg);
-      /* TODO: Keep listening UNTIL done with receiving  */
+
       if (msg.getMessageNum() == msg.getTotalMessages()) {
-        break;
+        listen = false;
       }
-      msg = null;
 
     }
 
-    /* TODO: Close socket  */
     UDPSocket.close();
   }
 
@@ -153,31 +140,29 @@ public class FieldUnit implements IFieldUnit {
       System.out.println("Usage: ./fieldunit.sh <UDP rcv port> <RMI server HostName/IPAddress>");
       return;
     }
-
-    /* TODO: Parse arguments */
+    /*This is the udp port of the sensor to which the fieldunit wants to connect*/
     int UDPPort = Integer.parseInt(args[0]);
-    /* TODO: Check if this is a valid RMI address*/
+
+    /*This is the RMI server of the centralserver the fieldunit wants to connect to
+     * the format of the uri is rmi://hostname:port */
     String RMIServerAddress = args[1];
 
-    /* TODO: Construct Field Unit Object */
     FieldUnit fieldUnit = new FieldUnit();
 
-    /* TODO: Call initRMI on the Field Unit Object */
+    /* This initialises the RMI connection to the centralserver*/
     fieldUnit.initRMI(RMIServerAddress);
 
     boolean running = true;
 
     while (running) {
-      /* TODO: Wait for incoming transmission */
+      /*This sets the fieldunit socket to receive messages from the sensor
+       * It will stop when all messages are received or when it timesout*/
       fieldUnit.receiveMeasures(UDPPort, 50000);
-      /* TODO: Compute and print stats */
+
       fieldUnit.printStats();
-      /* TODO: Compute Averages - call sMovingAverage()
-            on Field Unit object */
       fieldUnit.sMovingAverage(7);
-      /* TODO: Send data to the Central Serve via RMI and
-       *        wait for incoming transmission again
-       */
+
+      /* Sends averages to central server */
       fieldUnit.sendAverages();
       fieldUnit.reinitializeAttributes();
     }
@@ -188,29 +173,19 @@ public class FieldUnit implements IFieldUnit {
   @SuppressWarnings("removal")
   @Override
   public void initRMI(String address) {
-    /* If you are running the program within an IDE instead of using the
-     * provided bash scripts, you can use the following line to set
-     * the policy file
-     */
-
-    System.setProperty("java.security.policy", "file:./policy\n");
-
-    /* TODO: Initialise Security Manager */
-    Registry registry = null;
     if (System.getSecurityManager() == null) {
       System.setSecurityManager(new SecurityManager());
     }
+
+    Registry registry = null;
     try {
-      /* TODO: Bind to RMIServer */
+      /* Binds to central server*/
       URI uri = new URI(address);
       registry = LocateRegistry.getRegistry(uri.getHost(), uri.getPort());
-      if (registry == null) {
-        throw new RuntimeException();
-      }
-      //For debugging, to see what registry it is connecting to, enable:
-      System.out.println(registry.toString());
+
+      // For debugging, to see what registry it is connecting to, enable:
+      //System.out.println(registry.toString());
       this.central_server = (ICentralServer) registry.lookup("CentralServer");
-      /* TODO: Send pointer to LocationSensor to RMI Server */
       central_server.setLocationSensor(this.locationSensor);
     } catch (RemoteException e) {
       e.printStackTrace();
@@ -218,6 +193,8 @@ public class FieldUnit implements IFieldUnit {
       e.printStackTrace();
     } catch (URISyntaxException e) {
       e.printStackTrace();
+    } catch (Exception e) {
+      System.out.println("Unhandled exception: " + e.toString());
     }
 
 
@@ -225,7 +202,7 @@ public class FieldUnit implements IFieldUnit {
 
   @Override
   public void sendAverages() {
-    /* TODO: Attempt to send messages the specified number of times */
+    /*Sends averages to central server*/
     System.out.println("[Field Unit] Sending SMAs to RMI\n\n");
     int number_of_moving_averages_to_send = this.movingAverages.size();
     MessageInfo msg = null;
@@ -234,47 +211,68 @@ public class FieldUnit implements IFieldUnit {
       movingAverage = movingAverages.get(i - 1);
       msg = new MessageInfo(number_of_moving_averages_to_send, i, movingAverage);
       try {
+        long timeStart = System.nanoTime();
         central_server.receiveMsg(msg);
+        long timeToSend = System.nanoTime() - timeStart;
+        this.arrayOfTimesTakenToSendToCentralServer.add(timeToSend);
       } catch (RemoteException e) {
         e.printStackTrace();
       }
     }
+    int sum = 0;
+    for (int i = 0; i < this.arrayOfTimesTakenToSendToCentralServer.size(); i++) {
+      sum += arrayOfTimesTakenToSendToCentralServer.get(i);
+    }
+    System.out.println("Average time taken to send rmi "
+        + "messages to central server - "
+        + sum / arrayOfTimesTakenToSendToCentralServer.size() + " nanoseconds or " +
+        +((sum / arrayOfTimesTakenToSendToCentralServer.size()) * Math.pow(10, -9)) + " seconds");
 
   }
 
   @Override
   public void printStats() {
-    /* TODO: Find out how many messages were missing (HOW TO DO THIS?) */
-    int missing_messages = this.totalMessagesExpected - this.receivedMessages.size();
-    System.out.println("Total Missing Messages = "
-        + missing_messages + " out of "
-        + this.totalMessagesExpected);
-    /* TODO: Print stats (i.e. how many message missing?
-     * do we know their sequence number? etc.) I can figure this out */
+    int missing_messages =
+        this.totalMessagesExpectedInCurrentExchange - this.receivedMessages.size();
+
+    System.out.println("Total Missing Messages = " + missing_messages + " out of "
+        + this.totalMessagesExpectedInCurrentExchange);
+
     if (missing_messages > 0) {
       int iterator = 0;
-      for (int i = 1; i <= this.totalMessagesExpected; i++) {
+      for (int i = 1; i <= this.totalMessagesExpectedInCurrentExchange; i++) {
         if (this.receivedMessages.get(iterator).getMessageNum() == i) {
           iterator++;
         } else {
-          missingMessagesNumbers.add(i);
+          missingMessageIds.add(i);
         }
       }
-      System.out.println("Message Numbers of Missing Messages:" + missingMessagesNumbers.toString());
+      System.out.println("Message Numbers of Missing Messages:" + missingMessageIds.toString());
+    }
+    int sum = 0;
+    for (int i = 1; i < this.arrayOfTimesTaken.size(); i++) {
+      sum += this.arrayOfTimesTaken.get(i);
+    }
+    if (0 <= arrayOfTimesTaken.size()) {
+      System.out.println("Average time taken to receive udp "
+          + "messages from sensor - (not including first message) "
+          + sum / arrayOfTimesTaken.size() + " nanoseconds or " +
+          +((sum / arrayOfTimesTaken.size()) * Math.pow(10, -9)) + " seconds");
     }
     System.out.println("===============================");
   }
 
-  public void reinitializeAttributes(){
-    /* TODO: Now re-initialise data structures for next time */
-    totalMessagesExpected = 0;
+  private void reinitializeAttributes() {
+    totalMessagesExpectedInCurrentExchange = 0;
+    isFirstMessageInExchange = true;
     receivedMessages.clear();
     movingAverages.clear();
-    missingMessagesNumbers.clear();
+    missingMessageIds.clear();
+    arrayOfTimesTaken.clear();
   }
 
 
-  // For testing
+  // For testing purposes
   final public ArrayList<MessageInfo> getReceivedMessages() {
     return this.receivedMessages;
   }
